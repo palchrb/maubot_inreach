@@ -1,0 +1,25 @@
+# ===== Gmail Admin API (Apps Script) =====
+admin_base_url: "https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec"
+admin_token: "REPLACE_ME"
+
+# ===== Gmail base address =====
+# The plugin will produce addresses like: local+<alias>@domain
+gmail_base_address: "email@example.com"
+
+# ===== Alias policy =====
+alias_append_random: true
+alias_random_len: 8
+
+# ===== Command access / permissions =====
+restrict_commands_to_local: false        # if true, only users on local_homeserver_domain can use commands
+local_homeserver_domain: ""              # e.g. "example.org"
+pl_required: 50                          # power level required for admin ops (sub/unsub/mode/relay/set)
+adminlist: []                            # e.g. ["@admin:example.org"]
+
+# ===== Sending policy (defaults for fresh subs) =====
+active_mode_default: false               # default bridging mode for new rooms: true=active, false=passive(manual)
+max_reply_chars: 160                     # default per-room limit; rooms can override via !inreach set max <n>
+allow_non_admin_send: true               # when relay_mode is off and this is false, only admins may send
+
+# ===== Web =====
+allow_query_token: false                 # accept ?token= in /inreach/send (normally keep Off)

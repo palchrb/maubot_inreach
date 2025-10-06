@@ -1,0 +1,14 @@
+maubot: 0.5.0
+id: vibb.me.inreach
+version: 0.0.5
+license: AGPL-3.0-or-later
+modules:
+  - inreach
+main_class: InReachPlugin
+database: true
+database_type: asyncpg
+webapp: true
+config: true
+
+extra_files:
+- base-config.yaml
