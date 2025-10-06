@@ -2,7 +2,7 @@
 Something you did not know you need, and most likely you don't... Maubot plugin to enable you to chat with users of Garmin Inreach devices via your favorite matrix client :-) Can also be used to bridge matrix group chats to an inreach device (which could become expensive of course)
 
 
-Its not beautiful code, and not very advanced and it's currently based on the fact that a (non-pro account) inreach can only send either text or emails.. So this is a combination of other projects of mine; the matrix room specific webhook plugin and my gmail to webhook plugin (and apps script) pub/sub push based instance. 
+Its not beautiful code, and not very advanced and it's currently based on the fact that a (non-pro account) inreach can only send either text or emails.. So this is a combination of other projects of mine; the matrix room specific webhook plugin and my gmail to webhook plugin (and apps script) pub/sub push based instance. This means in its current form you need to have setup a gmail address and and a connect apps script to manage incoming emails from the inreach user and bridge them to the matrix room via webhook, the code from here is copy paste to use for this exact purpose: (https://github.com/palchrb/gmail_webhook/). In addition you either need to set up a timer every few minutes or so to trigger the script - or as i have done, set up a google cloud project to get pub/sub set up where incoming emails trigger that the script instantly runs. 
 
 The way it works;
 - !inreach sub alias to set up the system and generate a gmail + address that your inreach user can send their messages to
