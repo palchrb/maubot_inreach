@@ -11,5 +11,9 @@ The way it works;
 - Check !inreach help for all commands in the room; but you can choose whether to bride only messages with !inreach send <message> or to send all user messages without any ! prefix commands (passive mode). You can also enable relay mode to relay all messages from multiple matrix users in the room.
 - Currently only set up to bridge 1 room to 1 inreach user
 
+Stuff i could consider changing;
+- Maybe more elegant to use IMAP_CLIENT inside maubot? With IMAP IDLE it would be quite similar to pub/sub from gmail and people can choose their own IMAP account providers
+- Does not support images og voice, as i only have Inreach mini 2 which does not support this i have not seen the need yet
+- Probably something else as well!
 
 Feel free to contact me [on Matrix](https://matrix.to/#/#whatever:vibb.me)
