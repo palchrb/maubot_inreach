@@ -7,7 +7,7 @@ from urllib.parse import urlparse, parse_qs, urlencode, quote, unquote
 
 from aiohttp import hdrs, ClientResponse
 from aiohttp.web import Request, Response
-
+from html import escape as html_escape
 from maubot import Plugin, PluginWebApp
 from maubot.handlers import command, web, event
 from mautrix.types import (
@@ -17,6 +17,8 @@ from mautrix.types import (
     MessageEvent,
     MessageEventContent,
     PowerLevelStateEventContent,
+    TextMessageEventContent,
+    Format, 
 )
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
@@ -55,6 +57,50 @@ def parse_auth_token(req: Request, allow_query: bool) -> Optional[str]:
         if tok:
             return tok
     return None
+
+
+def trim_utf8(s: str, max_bytes: int) -> str:
+    """Trim string to at most max_bytes UTF-8 bytes."""
+    b = s.encode("utf-8")
+    if len(b) <= max_bytes:
+        return s
+    # binary search trim point
+    lo, hi = 0, len(s)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if len(s[:mid].encode("utf-8")) <= max_bytes:
+            lo = mid + 1
+        else:
+            hi = mid
+    return s[: lo - 1]
+
+
+def strip_quotes(s: str) -> str:
+    s = s.strip()
+    if (len(s) >= 2) and ((s[0] == s[-1]) and s[0] in ("'", '"')):
+        return s[1:-1]
+    return s
+
+
+def parse_profile_args(raw: str) -> Tuple[str, str]:
+    """
+    Parse 'displayname [avatar_url]' from raw tail of command.
+    - If last token startswith mxc:// -> it's avatar_url, rest is displayname.
+    - Else: whole string is displayname, avatar_url = "".
+    Quotes around displayname are allowed.
+    """
+    raw = raw.strip()
+    if not raw:
+        return "", ""
+    parts = raw.rsplit(maxsplit=1)
+    if len(parts) == 2 and parts[1].startswith("mxc://"):
+        display = strip_quotes(parts[0])
+        avatar = parts[1]
+    else:
+        display = strip_quotes(raw)
+        avatar = ""
+    # MSC limits: 255 bytes for id/displayname after JSON decoding
+    return trim_utf8(display, 255), avatar
 
 
 # ============ config ============
@@ -321,6 +367,8 @@ class InReachPlugin(Plugin):
     @web.post("/inreach/send")
     async def webhook_inreach(self, req: Request) -> Response:
         """Bearer-protected endpoint that the Apps Script posts emails to."""
+
+
         token = parse_auth_token(req, bool(self.config.get("allow_query_token", False)))
         if not token:
             return Response(status=401, text="missing_token")
@@ -373,14 +421,49 @@ class InReachPlugin(Plugin):
                 str(room_id), reply_url, now_ms()
             )
 
-        pos_link = f"[Position]({reply_url})" if reply_url else ""
-        msg = f"**{escape_md(short_label)}**: {preview}"
-        if pos_link:
-            msg += f" — {pos_link}"
-
+        # Build content with MSC4144 fallback + HTML (📍 as clickable link)
         try:
-            # Force posting as a normal text message
-            await self.client.send_markdown(room_id, msg, msgtype="m.text")
+            # fetch profile for alias (displayname + avatar)
+            displayname = short_label
+            avatar_url = ""
+            if alias_in:
+                prof_row = await self.database.fetchrow(
+                    "SELECT displayname, avatar_url FROM inreach_alias WHERE room_id=$1 AND alias=$2",
+                    str(room_id), alias_in,
+                )
+                if prof_row:
+                    displayname = prof_row["displayname"] or short_label
+                    avatar_url = prof_row["avatar_url"] or ""
+
+            displayname = trim_utf8(displayname, 255)
+            profile_id = trim_utf8(alias_in or short_label, 255)
+
+            # Plaintext fallback (kort og uten rå URL)
+            plain = f"{displayname}: {preview}"
+            if reply_url:
+                plain += " 📍"
+
+            # HTML with per-message-profile fallback + 📍 link
+            fb = f'<strong data-mx-profile-fallback>{html_escape(displayname)}: </strong>'
+            html = f"<p>{fb}{html_escape(preview)}"
+            if reply_url:
+                html += f' <a href="{html_escape(reply_url)}">📍</a>'
+            html += "</p>"
+
+            content = TextMessageEventContent(
+                msgtype="m.text",
+                body=plain,
+                format=Format.HTML,
+                formatted_body=html,
+            )
+            content["com.beeper.per_message_profile"] = {
+                "id": profile_id,
+                "displayname": displayname,
+                "avatar_url": avatar_url,  # tom streng = ingen avatar
+                "has_fallback": True,
+            }
+
+            await self.client.send_message(room_id, content)
         except Exception:
             self.log.exception("Send to room failed")
             return Response(status=500, text="room_send_failed")
@@ -405,7 +488,9 @@ class InReachPlugin(Plugin):
             "- `!inreach relay <on|off>` — when on, prefix replies with `nick:` and allow everyone to send.\n"
             "- `!inreach set max <n>` — set per-room max chars (e.g. 160 or 1600). Long messages auto-split.\n"
             "- `!inreach send <text>` — send a reply via the latest InReach link.\n"
-            "- `!inreach perms` — show permission diagnostics.\n\n"
+            "- `!inreach perms` — show permission diagnostics.\n"
+            "- `!inreach profile set <displayname> [avatar_mxc]` — set per-message displayname/avatar (mxc://...).\n"
+            "- `!inreach profile reset` — reset per-message profile to defaults (label, no avatar).\n\n"
             f"Gmail address format: **{base.replace('@', '+<alias>@')}**\n"
             f"Default room mode on subscribe: **{active_default}**\n"
             f"Default max chars: **{int(self.config.get('max_reply_chars', 160))}**."
@@ -541,15 +626,23 @@ class InReachPlugin(Plugin):
             now_ms(),
         )
 
-        # store alias mapping
+        # store alias mapping (+displayname/avatar defaults)
         await self.database.execute(
             """
-            INSERT INTO inreach_alias (room_id, alias, label, created_ts)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO inreach_alias (room_id, alias, label, displayname, avatar_url, created_ts)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (room_id, alias)
-            DO UPDATE SET label=excluded.label, created_ts=excluded.created_ts
+            DO UPDATE SET label=excluded.label,
+                          displayname=excluded.displayname,
+                          avatar_url=excluded.avatar_url,
+                          created_ts=excluded.created_ts
             """,
-            str(evt.room_id), alias, friendly, now_ms()
+            str(evt.room_id),
+            alias,
+            friendly,
+            friendly,   # default displayname = alias uten suffix
+            "",         # default avatar_url = tom streng
+            now_ms()
         )
 
         # confirmation
@@ -600,7 +693,7 @@ class InReachPlugin(Plugin):
             await evt.reply("No InReach config found here.")
             return
         arow = await self.database.fetchrow(
-            "SELECT alias, label FROM inreach_alias WHERE room_id=$1 ORDER BY created_ts DESC LIMIT 1",
+            "SELECT alias, label, displayname, avatar_url FROM inreach_alias WHERE room_id=$1 ORDER BY created_ts DESC LIMIT 1",
             str(evt.room_id),
         )
         plus = self._gmail_plus(arow["alias"]) if arow else "(no alias yet)"
@@ -609,12 +702,17 @@ class InReachPlugin(Plugin):
             str(evt.room_id),
         )
         rurl = (rrow["last_reply_url"] if rrow else None) or "(not yet received)"
+        disp = (arow["displayname"] if arow else "") or (arow["label"] if arow else "")
+        avat = (arow["avatar_url"] if arow else "") or "(none)"
+
         await self.client.send_markdown(
             evt.room_id,
             "**InReach settings**\n"
             f"- name: `{room['friendly'] or (arow['label'] if arow else '')}`\n"
             f"- alias: `{arow['alias'] if arow else '(none)'}`\n"
             f"- +address: `{plus}`\n"
+            f"- displayname: `{disp}`\n"
+            f"- avatar mxc: `{avat}`\n"
             f"- last reply link: `{rurl}`\n"
             f"- mode: **{'active' if (room['mode'] == 'active' and room['active']) else 'passive'}**\n"
             f"- relay mode: **{'on' if room['relay_mode'] else 'off'}**\n"
@@ -642,6 +740,57 @@ class InReachPlugin(Plugin):
     @command.argument("text", pass_raw=True, required=True)
     async def send_cmd(self, evt: MessageEvent, text: str) -> None:
         await self._bridge_outgoing(evt, text)
+
+    # ---------------- profile management ----------------
+    @inreach.subcommand(name="profile", help="Manage displayname/avatar used in per-message profile")
+    async def profile_root(self, evt: MessageEvent) -> None:
+        await evt.reply("Usage: !inreach profile set <displayname> [avatar_mxc] | !inreach profile reset")
+
+    @profile_root.subcommand(name="set", help="Set displayname and optional avatar for this room's InReach alias")
+    @command.argument("rest", pass_raw=True, required=True)
+    async def profile_set(self, evt: MessageEvent, rest: str) -> None:
+        if not await self._is_admin(evt.room_id, evt.sender):
+            await evt.reply("You are not allowed to do this here.")
+            return
+        displayname, avatar_url = parse_profile_args(rest)
+        if not displayname:
+            await evt.reply("Usage: !inreach profile set <displayname> [avatar_mxc]")
+            return
+        if avatar_url and not avatar_url.startswith("mxc://"):
+            await evt.reply("avatar_mxc must start with mxc:// or be omitted.")
+            return
+
+        arow = await self.database.fetchrow(
+            "SELECT alias FROM inreach_alias WHERE room_id=$1 ORDER BY created_ts DESC LIMIT 1",
+            str(evt.room_id),
+        )
+        if not arow:
+            await evt.reply("No alias found for this room. Use !inreach sub first.")
+            return
+        alias = arow["alias"]
+        await self.database.execute(
+            "UPDATE inreach_alias SET displayname=$3, avatar_url=$4 WHERE room_id=$1 AND alias=$2",
+            str(evt.room_id), alias, displayname, (avatar_url or ""),
+        )
+        await evt.reply(f"✅ Profile updated: **{displayname}** {(avatar_url or '').strip()}")
+
+    @profile_root.subcommand(name="reset", help="Reset profile to alias defaults")
+    async def profile_reset(self, evt: MessageEvent) -> None:
+        if not await self._is_admin(evt.room_id, evt.sender):
+            await evt.reply("You are not allowed to do this here.")
+            return
+        arow = await self.database.fetchrow(
+            "SELECT alias, label FROM inreach_alias WHERE room_id=$1 ORDER BY created_ts DESC LIMIT 1",
+            str(evt.room_id),
+        )
+        if not arow:
+            await evt.reply("No alias found for this room.")
+            return
+        await self.database.execute(
+            "UPDATE inreach_alias SET displayname=$3, avatar_url='' WHERE room_id=$1 AND alias=$2",
+            str(evt.room_id), arow["alias"], arow["label"],
+        )
+        await evt.reply(f"♻️ Profile reset to default ({arow['label']})")
 
     # -------- passive/active message bridge --------
     @event.on(EventType.ROOM_MESSAGE)
@@ -759,7 +908,7 @@ class InReachPlugin(Plugin):
             import secrets, string
             n = int(self.config.get("alias_random_len", 8) or 8)
             alphabet = string.ascii_lowercase + string.digits
-            suffix = "".join(secrets.choice(alphabet) for _ in range(max(1, n)))
+            suffix = "".join(secrets.choice(alphabet) for i in range(max(1, n)))
             keep = max(1, 64 - (len(suffix) + 1))
             alias = friendly[:keep] + "-" + suffix
         return alias
