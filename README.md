@@ -9,7 +9,7 @@ The way it works;
 - The inreach user then needs to send the first message, to give the matrix room the right link to be able to respond via garmin api. Then everything is setup!
 - The bridge will rotate reply links after each received message to make sure there is a fresh one available (and they don't seem to expire very quickly either.
 - Check !inreach help for all commands in the room; but you can choose whether to bride only messages with !inreach send <message> or to send all user messages without any ! prefix commands (passive mode). You can also enable relay mode to relay all messages from multiple matrix users in the room.
-- Currently only set up to bridge 1 room to 1 inreach user
+- Currently only set up to bridge 1 room to 1 inreach user (but supports multiple rooms of course)
 
 Stuff i could consider changing;
 - Maybe more elegant to use IMAP_CLIENT inside maubot? With IMAP IDLE it would be quite similar to pub/sub from gmail and people can choose their own IMAP account providers
