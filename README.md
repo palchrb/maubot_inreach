@@ -16,4 +16,6 @@ Stuff i could consider changing;
 - Does not support images og voice, as i only have Inreach mini 2 which does not support this i have not seen the need yet
 - Probably something else as well!
 
+Also supports msc4144 proposal, so for compatible matrix clients you can see and set a display name and avatar for the bot user per message actually received from the inreach user.
+
 Feel free to contact me [on Matrix](https://matrix.to/#/#whatever:vibb.me)
