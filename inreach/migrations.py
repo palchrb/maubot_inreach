@@ -3,6 +3,7 @@ from mautrix.util.async_db import UpgradeTable, Scheme, Connection
 
 upgrade_table = UpgradeTable()
 
+
 @upgrade_table.register(description="Initial schema for InReach plugin")
 async def upgrade_v1(conn: Connection, scheme: Scheme) -> None:
     # Rooms that use the InReach bridge.
@@ -55,10 +56,12 @@ async def upgrade_v1(conn: Connection, scheme: Scheme) -> None:
         )
     """)
 
+
 @upgrade_table.register(description="Add helpful indexes")
 async def upgrade_v2(conn: Connection, scheme: Scheme) -> None:
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_inreach_alias_room  ON inreach_alias (room_id)")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_inreach_alias_alias ON inreach_alias (alias)")
+
 
 @upgrade_table.register(description="Safety: ensure nullable friendly and sane defaults")
 async def upgrade_v3(conn: Connection, scheme: Scheme) -> None:
@@ -78,6 +81,7 @@ async def upgrade_v3(conn: Connection, scheme: Scheme) -> None:
         await conn.execute("ALTER TABLE inreach_room ALTER COLUMN mode SET DEFAULT 'manual'")
     except Exception:
         pass
+
 
 @upgrade_table.register(description="Per-room policy: max_chars and relay_mode")
 async def upgrade_v4(conn: Connection, scheme: Scheme) -> None:
@@ -104,5 +108,28 @@ async def upgrade_v4(conn: Connection, scheme: Scheme) -> None:
             await conn.execute("UPDATE inreach_room SET relay_mode=0 WHERE relay_mode IS NULL")
         else:
             await conn.execute("UPDATE inreach_room SET relay_mode=FALSE WHERE relay_mode IS NULL")
+    except Exception:
+        pass
+
+
+@upgrade_table.register(description="Add displayname and avatar_url columns to inreach_alias")
+async def upgrade_v5(conn: Connection, scheme: Scheme) -> None:
+    try:
+        await conn.execute("ALTER TABLE inreach_alias ADD COLUMN IF NOT EXISTS displayname TEXT")
+    except Exception:
+        pass
+    try:
+        await conn.execute("ALTER TABLE inreach_alias ADD COLUMN IF NOT EXISTS avatar_url TEXT")
+    except Exception:
+        pass
+    # backfill defaults
+    try:
+        await conn.execute(
+            "UPDATE inreach_alias SET displayname=label WHERE displayname IS NULL OR displayname=''"
+        )
+    except Exception:
+        pass
+    try:
+        await conn.execute("UPDATE inreach_alias SET avatar_url='' WHERE avatar_url IS NULL")
     except Exception:
         pass
