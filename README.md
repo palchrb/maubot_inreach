@@ -11,9 +11,11 @@ The way it works;
 - Check !inreach help for all commands in the room; but you can choose whether to bride only messages with !inreach send <message> or to send all user messages without any ! prefix commands (passive mode). You can also enable relay mode to relay all messages from multiple matrix users in the room.
 - Currently only set up to bridge 1 room to 1 inreach user (but supports multiple rooms of course)
 
+NOTE: the endpoint i am using for sending messages to garmin only supports 160 signs even if you have a messenger plus which can send/receive 1600 signs.. They are forcing you to use the garmin messenger app to do so.. So currently this only works for sending 160 sign max messages. SO you should just leave the max char setting at 160 - which will break longer messages from the matrix room  into ~160 chars long chunks.. 
+
 Stuff i could consider changing;
-- Maybe more elegant to use IMAP_CLIENT inside maubot? With IMAP IDLE it would be quite similar to pub/sub from gmail and people can choose their own IMAP account providers
-- Does not support images og voice, as i only have Inreach mini 2 which does not support this i have not seen the need yet
+- Maybe more elegant to use IMAP_CLIENT inside maubot? With IMAP IDLE it would be quite similar to pub/sub from gmail and people can choose their own IMAP account providers. But gmail pub/sub seems to be very fast, with my messages sent via garmin messenger --> gmail --> matrix room in 7-8 seconds so don't think i will bother working on that.
+- Does not support images og voice, as i only have Inreach mini 2 which does not support this i have not seen the need yet  (BUT i am currently working on a hacky solution for this here, which actually works https://github.com/palchrb/inreach_mediarelay/ Plan is to extend either this plugin here, or to just add a separate media_relay plugin to manage that part of things)
 - Probably something else as well!
 
 Also supports msc4144 proposal, so for compatible matrix clients you can see and set a display name and avatar for the bot user per message actually received from the inreach user.
